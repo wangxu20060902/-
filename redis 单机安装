@@ -1,0 +1,84 @@
+redis 安装
+
+yum install gcc -y ##安装依赖
+
+1.下载 安装
+wget http://download.redis.io/releases/redis-5.0.3.tar.gz ##下载
+tar zvxf /root/redis-5.0.3.tar.gz  -C /usr/local/   ##解压
+cd /usr/local/  && mv redis-5.0.3 redis $&& cd redis  ##重命名
+ make && make install      ##安装依赖
+ 
+2.配置启动
+vim redis.conf   ##修改如下
+
+#允许远程访问
+bind 127.0.0.1 修改为 # bind 127.0.0.1
+#默认启动时后台启动
+daemonize yes
+#设置密码
+requirepass abc12   
+
+设置开机启动
+vim /usr/lib/systemd/system/redis.service
+##添加
+
+[Unit]
+
+Description=The redis-server Process Manager
+
+After=syslog.target
+
+After=network.target
+
+
+
+[Service]
+
+Type=forking
+
+ExecStart=/usr/local/redis/src/redis-server /usr/local/redis/redis.conf
+
+ExecReload=/bin/kill -USR2 $MAINPID
+
+ExecStop=/bin/kill -SIGINT $MAINPID
+
+Restart=always
+
+PrivateTmp=true
+
+
+
+[Install]
+
+WantedBy=multi-user.target
+
+开机启动：
+
+systemctl daemon-reload
+
+systemctl start redis-server.service
+
+systemctl enable redis-server.service
+
+配置防火墙：
+
+启动防火墙：systemctl start firewalld
+
+将6379端口添加到防火墙例外并重启：
+
+firewall-cmd --zone=public --add-port=6379/tcp --permanent
+
+firewall-cmd --reload
+
+3. 测试
+打开客户端
+./redis-cli
+127.0.0.1:6379> auth gemalto.123
+OK
+127.0.0.1:6379> set test test
+OK
+127.0.0.1:6379> get test
+"test"
+
+搭建成功
+
