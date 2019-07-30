@@ -1,0 +1,257 @@
+mycat 安装和实现mysql读写分离和主从切换
+参考blog   https://www.cnblogs.com/kevingrace/p/9365840.html
+mysql master：192.168.163.179:3306
+mysql slave：192.168.163.180:3306
+mycat:192.168.163.179
+
+1.下载mycat对应版本并安装部署
+wget http://dl.mycat.io/1.6.7.1/Mycat-server-1.6.7.1-release-20190627191042-linux.tar.gz
+解压mycat到部署目录下
+tar zxvf Mycat-server-1.6.7.1-release-20190627191042-linux.tar.gz -C /usr/local/
+ls /usr/local/mycat
+bin  catlet  conf  lib  logs  version.txt
+
+mycat安装完成后，目录如下：
+bin     mycat命令，启动、重启、停止等
+catlet  catlet为Mycat的一个扩展功能
+conf    Mycat 配置信息,重点关注
+lib     Mycat引用的jar包，Mycat是java开发的
+logs    日志文件，包括Mycat启动的日志和运行的日志。
+
+Mycat的配置文件都在conf目录里面，这里介绍几个常用的文件：
+server.xml   Mycat的配置文件，设置账号、参数等
+schema.xml   Mycat对应的物理数据库和数据库表的配置
+rule.xml     Mycat分片（分库分表）规则
+
+2.Mycat相关配置
+配置文件在/usr/local/mycat/conf 目录下 配置前对原有文件备份
+cp server.xml server.xml.bak 
+cp schema.xml schema.xml.bak
+cp rule.xml rule.xml.bak
+
+vim server.xml
+
+        <user name="wangxu" defaultAccount="true">
+                <property name="password">gemato.123</property>
+                <property name="schemas">mycat</property>
+
+                <!-- 表级 DML 权限设置 -->
+                <!--            
+                <privileges check="false">
+                        <schema name="TESTDB" dml="0110" >
+                                <table name="tb01" dml="0000"></table>
+                                <table name="tb02" dml="1111"></table>
+                        </schema>
+                </privileges>           
+                 -->
+        </user>
+
+        <user name="user">
+                <property name="password">user</property>
+                <property name="schemas">mycat</property>
+                <property name="readOnly">true</property>
+        </user>
+
+</mycat:server>
+
+重点关注上面这段配置，其他默认即可。
+=======================================
+参数           说明
+user          用户配置节点
+name          登录的用户名，也就是连接Mycat的用户名。
+password      登录的密码，也就是连接Mycat的密码
+schemas       数据库名，这里会和schema.xml中的配置关联，多个用逗号分开，例如需要这个用户需要管理两个数据库db1,db2，则配置db1,dbs
+privileges    配置用户针对表的增删改查的权限
+readOnly      mycat逻辑库所具有的权限。true为只读，false为读写都有，默认为false。
+=======================================
+我这里配置了一个账号wangxu，密码为gemalto.123,逻辑数据库为mycat，这些信息都可以自己随意定义,读写权限都有，没有针对表做任何特殊的权限。
+注意：
+- server.xml文件里登录mycat的用户名和密码可以任意定义，这个账号和密码是为客户机登录mycat时使用的账号信息。
+- 逻辑库名(如上面的mycat，也就是登录mycat后显示的库名，切换这个库之后，显示的就是代理的真实mysql数据库的表)要在schema.xml里面也定义，否则会导致mycat服务启动失败！
+- 这里只定义了一个标签，所以把多余的都注释了。如果定义多个标签，即设置多个连接mycat的用户名和密码，那么就需要在schema.xml文件中定义多个对应的库！
+
+schema.xml是最主要的配置项，此文件关联mysql读写分离策略！读写分离、分库分表策略、分片节点都是在此文件中配置的！
+MyCat作为中间件，它只是一个代理，本身并不进行数据存储，需要连接后端的MySQL物理服务器，此文件就是用来连接MySQL服务器的
+
+schema.xml文件中配置的参数解释
+参数            说明
+schema         数据库设置，此数据库为逻辑数据库，name与server.xml中schema对应
+dataNode       分片信息，也就是分库相关配置
+dataHost       物理数据库，真正存储数据的数据库
+
+配置说明
+name属性唯一标识dataHost标签，供上层的标签使用。
+maxCon属性指定每个读写实例连接池的最大连接。也就是说，标签内嵌套的
+writeHost、readHost标签都会使用这个属性的值来实例化出连接池的最大连接数。
+minCon属性指定每个读写实例连接池的最小连接，初始化连接池的大小。
+
+每个节点的属性逐一说明
+schema:
+属性             说明
+name               逻辑数据库名，与server.xml中的schema对应
+checkSQLschema     数据库前缀相关设置，建议看文档，这里暂时设为folse
+sqlMaxLimit    select 时默认的limit，避免查询全表
+
+table
+属性             说明
+name               表名，物理数据库中表名
+dataNode       表存储到哪些节点，多个节点用逗号分隔。节点为下文dataNode设置的name
+primaryKey     主键字段名，自动生成主键时需要设置
+autoIncrement      是否自增
+rule               分片规则名，具体规则下文rule详细介绍
+
+dataNode
+属性             说明
+name               节点名，与table中dataNode对应
+datahost       物理数据库名，与datahost中name对应
+database       物理数据库中数据库名
+
+dataHost
+属性             说明
+name               物理数据库名，与dataNode中dataHost对应
+balance            均衡负载的方式
+writeType      写入方式
+dbType             数据库类型
+heartbeat      心跳检测语句，注意语句结尾的分号要加
+
+schema.xml文件中有三点需要注意：balance="1"，writeType="0" ,switchType="1" 
+schema.xml中的balance的取值决定了负载均衡对非事务内的读操作的处理。balance 属性负载均衡类型，目前的取值有 4 种：
+balance="0"：      不开启读写分离机制，所有读操作都发送到当前可用的writeHost 上,即读请求仅发送到writeHost上。
+balance="1"：      读请求随机分发到当前writeHost对应的readHost和standby的writeHost上。即全部的readHost与stand by writeHost 参与
+                   select 语句的负载均衡，简单的说，当双主双从模式(M1 ->S1 ， M2->S2，并且 M1 与 M2 互为主备)，正常情况下， M2,S1,
+                   S2 都参与 select 语句的负载均衡
+balance="2"：      读请求随机分发到当前dataHost内所有的writeHost和readHost上。即所有读操作都随机的在writeHost、 readhost 上分发。
+balance="3"：      读请求随机分发到当前writeHost对应的readHost上。即所有读请求随机的分发到 wiriterHost 对应的 readhost 执行,writerHost 不负担读压力，注意 balance=3 只在 1.4 及其以后版本有，1.3 没有。
+
+writeType 属性，负载均衡类型，目前的取值有 3 种：
+writeType="0"   所有写操作发送到配置的第一个 writeHost，第一个挂了切到还生存的第二个writeHost，重新启动后已切换后的为准，切换记录在配置文件中:dnindex.properties .
+writeType="1"   所有写操作都随机的发送到配置的 writeHost。
+writeType="2"   没实现。
+
+对于事务内的SQL默认走写节点
+以 /*balance*/ 开头，可以指定SQL使用特定负载均衡方案。例如在大环境开启读写分离的情况下，特定强一致性的SQL查询需求；
+slaveThreshold：近似的主从延迟时间（秒）Seconds_Behind_Master < slaveThreshold ，读请求才会分发到该Slave，确保读到的数据相对较新。
+schema.xml中的writeType的取值决定了负载均衡对写操作的处理：
+writeType="0"：所有的写操作都发送到配置文件中的第一个write host。（第一个write host故障切换到第二个后，即使之后修复了仍然维持第二个为写库）。推荐取0值，不建议修改.
+主从切换（双主failover）：switchType 属性
+如果细心观察schem.xml文件的话，会发现有一个参数：switchType，如下配置：
+ <dataHost name="237_15" maxCon="1000" minCon="10" balance="1" writeType="0" dbType="mysql" dbDriver="native"switchType="1"  slaveThreshold="100"> 
+参数解读
+switchType="-1"：  不自动切换
+switchType="1"：   默认值，自动切换
+switchType="2"：   基于MySQL主从同步的状态来决定是否切换。需修改heartbeat语句（即心跳语句）：show slave status
+switchType="3"：   基于Mysql Galera Cluster（集群多节点复制）的切换机制。需修改heartbeat语句（即心跳语句）：show status like 'wsrep%'
+
+dbType属性
+指定后端连接的数据库类型，目前支持二进制的mysql协议，还有其他使用JDBC连接的数据库。例如：mongodb、oracle、spark等。
+
+dbDriver属性指定连接后端数据库使用的
+Driver，目前可选的值有native和JDBC。
+使用native的话，因为这个值执行的是二进制的mysql协议，所以可以使用mysql和maridb。
+其他类型的数据库则需要使用JDBC驱动来支持。从1.6版本开始支持postgresql的native原始协议。
+如果使用JDBC的话需要将符合JDBC 4标准的驱动JAR包放到MYCAT\lib目录下，并检查驱动JAR包中包括如下目录结构的文件：
+META-INF\services\java.sql.Driver。在这个文件内写上具体的Driver类名，例如：com.mysql.jdbc.Driver。
+
+heartbeat标签
+这个标签内指明用于和后端数据库进行心跳检查的语句。例如,MYSQL可以使用select user()，Oracle可以使用select 1 from dual等。
+这个标签还有一个connectionInitSql属性，主要是当使用Oracla数据库时，需要执行的初始化SQL 
+语句就这个放到这里面来。例如：altersession set nls_date_format='yyyy-mm-dd hh24:mi:ss'
+1.4主从切换的语句必须是：showslave status
+
+writeHost标签、readHost标签
+这两个标签都指定后端数据库的相关配置给mycat，用于实例化后端连接池。
+唯一不同的是：writeHost指定写实例、readHost指定读实例，组着这些读写实例来满足系统的要求。
+在一个dataHost内可以定义多个writeHost和readHost。但是，如果writeHost指定的后端数据库宕机，那么这个writeHost绑定的所有readHost都将不可用。
+另一方面，由于这个writeHost宕机系统会自动的检测到，并切换到备用的writeHost上去。
+
+应用场景1--->Mycat读写分离（负载均衡）、主从自动切换
+目前有大量Mycat的生产实践案例是属于简单的读写分离类型的，此案例主要用到Mycat的以下特性：
+- 读写分离支持
+- 高可用
+大多数读写分离的案例是同时支持高可用性的，即Mycat+MySQL主从复制的集群，并开启Mycat的读写分离功能，这种场景需求下，Mycat是最为简单并且功能最为
+丰富的一类Proxy，正常情况下，配置文件也最为简单，不用每个表配置，只需要在schema.xml中的元素上增加dataNode=“defaultDN”属性，并配置此dataNode
+对应的真实物理数据库的database，然后dataHost开启读写分离功能即可。
+修改mycat的schema.xml：
+balance为1：让全部的readHost及备用的writeHost参与select的负载均衡。 
+switchType为2：基于MySQL主从同步的状态决定是否切换。 
+heartbeat：主从切换的心跳语句必须为show slave status。
+仅仅进行读写分离的schema.xml配置（备份原来的schema.xml文件，清空，直接复制下面内容）：不想要自动切换功能，即MySQL写节点宕机后不自动切换到备用节点：
+vim schema.xml
+<?xml version="1.0"?>
+<!DOCTYPE mycat:schema SYSTEM "schema.dtd">
+<mycat:schema xmlns:mycat="http://io.mycat/">
+ 
+        <schema name="mycat" checkSQLschema="false" sqlMaxLimit="100" dataNode="haha,hello">
+        </schema>
+         
+<dataNode name="haha" dataHost="Mycat-node" database="avacar-prod" />
+<dataNode name="hello" dataHost="Mycat-node" database="avacar-idp-prod" />
+ 
+    <dataHost name="Mycat-node" maxCon="1000" minCon="10" balance="1" writeType="0" dbType="mysql" dbDriver="native" switchType="1"  slaveThreshold="100">
+        <heartbeat>show slave status</heartbeat>
+        <writeHost host="Mysql-node1" url="192.168.163.179:3306" user="mycat" password="geamtlo.123">
+             <readHost host="Mysql-node2" url="192.168.163.180:3306" user="mycat" password="geamtlo.123">
+             </readHost>
+        </writeHost>
+    </dataHost>
+ 
+</mycat:schema>
+
+实现主从自动切换的schema.xml配置：即MySQL写节点宕机后自动切换到备用节点（也就是把从机也配置成writeHosts）：
+ vim schema.xml
+ <?xml version="1.0"?>
+<!DOCTYPE mycat:schema SYSTEM "schema.dtd">
+<mycat:schema xmlns:mycat="http://io.mycat/">
+ 
+        <schema name="mycat" checkSQLschema="false" sqlMaxLimit="100" dataNode="haha">
+        </schema>
+         
+<dataNode name="haha" dataHost="Mycat-node" database="kevin" />
+ 
+    <dataHost name="Mycat-node" maxCon="1000" minCon="10" balance="1" writeType="0" dbType="mysql" dbDriver="native" switchType="1"  slaveThreshold="100">
+        <heartbeat>show slave status</heartbeat>
+        <writeHost host="Mysql-node1" url="192.168.163.179:3306" user="mycat" password="geamtlo.123">
+             <readHost host="Mysql-node2" url="192.168.163.180:3306" user="mycat" password="geamtlo.123">
+             </readHost>
+        </writeHost>
+        <writeHost host="Mysql-node2" url="192.168.163.180:3306" user="mycat" password="geamtlo.123">
+        </writeHost>
+    </dataHost>
+ 
+</mycat:schema>
+
+上面配置中，balance改为1，表示读写分离。
+以上配置达到的效果就是192.168.163.179为主库，192.168.163.180为从库。
+注意：要保证192.168.163.179和192.168.163.180机器能使用root/123456权限成功登录mysql数据库。同时，也一定要授权mycat机器能使用root/123456权限成功登录这两台机器的mysql数据库！！这很重要，否则会导致登录mycat后，对库和表操作失败！
+一主一从结构是最简单的配置。 
+MyCat支持双主多从，如果有N个主，那么就配置N个writeHost兄弟节点；如果有M个从节点，那么就配置M个readHost节点即可。 
+也可以有多台MySQL服务器，或者SQL Server、Oracle等，配置多个dataHost节点就可以。
+需要注意的是：
+Mycat主从分离只是在读的时候做了处理，写入数据的时候，只会写入到writehost，需要通过mycat的主从复制将数据复制到readhost！这个问题需要弄明白！！
+如果没有提前做mysql主从复制，会发现Mycat读写分离配置后，数据写入writehost后，readhost一直没有数据！因为Mycat就没有实现主从复制的功能，毕竟数据库本身自带的这个功能才是最高效稳定的。
+特别注意：
+本案例采用的一主一从模式的两个mysql实例，并且针对单一的数据库名进行测试；大多数mycat使用场景都是在多主多从模式并针对多个库进行的。
+要想登录Mycat后看到mysql的真实数据库的表内容，需要在schema.xml文件中指明database，其中dataNote和dataHost名称可以自定义，database名称要是mysql上的库名。
+如果针对的是mysql的多个库，比如mysql的真实库名是kevin、grace、shanshan，那么schema.xml文件里应该指明多个库名，如：
+       <schema name="mycat" checkSQLschema="false" sqlMaxLimit="100" dataNode="haha,heihei,hengheng">
+       </schema>
+   <dataNode name="haha" dataHost="Mycat-node" database="kevin" />
+   <dataNode name="heihei" dataHost="Mycat-node" database="grace" />
+   <dataNode name="hengheng" dataHost="Mycat-node" database="shanshan" />
+   ........
+主从自动切换配置后，第一个writeHost故障后，会自动切换到第二个，第二个故障后自动切换到第三个；
+如果当是1主3从模式，可以把第1个从节点配置为writeHost 2，第2个和第3个从节点则配置为writeHost 1的readHost；
+
+./mycat start      #开启
+./mycat stop       #关闭
+./mycat restart    #重启
+./mycat status     #查看启动状态
+./mycat console    #前台运行
+./mycat pause      #暂停
+
+如果在启动时发现异常，在logs目录中查看日志。
+- wrapper.log  为程序启动的日志，启动时的问题看这个
+- mycat.log    为脚本执行时的日志，SQL脚本执行报错后的具体错误内容,查看这个文件。mycat.log是最新的错误日志，历史日志会根据时间生成目录保存。
+Mycat服务端口默认是8066
+Mycat还有一个管理端口，默认是9066
+在客户机远程登录Mycat登录mysql（将mycat启动起来后，远程连接，默认端口是8066,逻辑库名和账号密码就是在schema.xml里配置的信息。代码里用jdbc方式连接）
