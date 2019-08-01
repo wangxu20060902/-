@@ -1,0 +1,18 @@
+#!/bin/sh
+
+# Database info
+DB_USER="root"
+DB_PASS="1qaz@WSX"
+DB_HOST="localhost"
+DB_NAME="--all-databases"
+
+# Others vars
+BIN_DIR="/usr/local/mysql/bin"            #the mysql bin path
+BCK_DIR="/opt/mysql_data/mysqlBackup"     #the backup file directory
+DATE=`date +%F`
+
+# TODO
+# /usr/local/mysql/bin/mysqldump --opt -ubatsing -pbatsingpw -hlocalhost timepusher > /mnt/mysqlBackup/db_`date +%F`.sql
+# mysqldump --opt -u$DB_USER -p$DB_PASS -h$DB_HOST --add-drop-database $DB_NAME > $BCK_DIR/db_$DATE.sql  ##恢复数据库是会先删除里面的库
+$BIN_DIR/mysqldump --opt -u$DB_USER -p$DB_PASS -h$DB_HOST $DB_NAME > $BCK_DIR/db_$DATE.sql
+find /opt/mysql_data/mysqlBackup/ -mtime +10 -exec rm {} \;
