@@ -1,0 +1,59 @@
+centos 7.5以上 yum 安装mysql 5.7
+
+通过Yum安装mysql的yum仓库
+yum -y localinstall https://dev.mysql.com/get/mysql80-community-release-el7-1.noarch.rpm
+检查刚刚安装的yum源内容
+cat /etc/yum.repos.d/mysql-community.repo 
+可以看到配置文件里mysql的多个版本安装源，包括5.5/5.6/5.7/8.0四个版本
+
+选择mysql的安装版本
+
+先安装yum配置工具
+yum -y install yum-utils
+我们要安装mysql5.7版本
+先禁用5.5/5.6/8.0的yum源仓库
+使用--disable选项，表示禁用某个源仓库
+yum-config-manager --disable mysql55-community
+yum-config-manager --disable mysql56-community
+yum-config-manager --disable mysql80-community
+启用5.7仓库，或者你自行根据需求选择你需要使用的版本
+需求的版本使用--enable选项，表示启用某个仓库
+yum-config-manager --enable mysql57-community
+
+接下来验证仓库情况：
+
+先清除仓库缓存：
+yum clean all
+再验证仓库：
+yum repolist
+
+安装设定好的mysql版本
+
+再次确认当前yum源有效的mysql版本
+ yum info mysql-community-server
+ 
+ 
+vailable Packages
+Name        : mysql-community-server
+Arch        : x86_64
+Version     : 5.7.27
+Release     : 1.el7
+Size        : 165 M
+
+安装刚刚选择的mysql版本
+
+yum -y install mysql-community-server
+确认mysql安装成功
+启动及初始化mysql数据库
+systemctl start mysqld.service
+设置mysql为开机自启动
+使用systemctl命令
+systemctl enable mysqld.service
+systemctl status mysqld.service
+留意图中的enable，确认mysqld服务已经开启自启动
+
+查看密码
+grep "password" /var/log/mysqld.log
+
+登录 mysql -uroot -p
+输入上面查到的密码
