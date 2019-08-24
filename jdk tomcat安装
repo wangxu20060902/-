@@ -1,0 +1,103 @@
+jdk  tomcat 安装
+
+安装jdk
+下载jdk rpm包 rpm -ivh jdk-8u152-linux-x64.rpm
+#rpm -ivh jdk-8u152-linux-x64.rpm
+
+#vi  /etc/profile          //配置环境变量
+
+export JAVA_HOME=/usr/java/jdk1.8.0_152
+export JRE_HOME=${JAVA_HOME}/jre
+export CLASSPATH=.:${JAVA_HOME}/lib/:${JRE_HOME}/lib
+export PATH=${JAVA_HOME}/bin:$PATH
+
+#java             //验证jdk
+#javac    //验证jdk
+#java -version    //查看java版本
+
+安装tomcat9
+下载tomcat
+wget http://mirrors.tuna.tsinghua.edu.cn/apache/tomcat/tomcat-9/v9.0.24/bin/apache-tomcat-9.0.24.tar.gz
+
+tar zxvf apache-tomcat-9.0.24.tar.gz
+mv apache-tomcat-9.0.24 /usr/local/tomcat9
+ 
+配置自启动，切换至Tomcat的bin目录执行vi setenv.sh，并按i进入编辑模式，拷贝以下代码粘贴
+
+#add tomcat pid
+CATALINA_PID="$CATALINA_BASE/tomcat.pid"
+#add java opts
+JAVA_OPTS="-server -XX:PermSize=256M -XX:MaxPermSize=1024m -Xms512M -Xmx1024M -XX:MaxNewSize=256m"
+
+chmod +x setenv.sh
+vim /usr/lib/systemd/system/tomcat.service
+
+拷贝以下代码粘贴（注意将第6和7行的Tomcat路径/usr/local/tomcat9 换成你自己的Tomcat的绝对路径）
+
+[Unit]
+Description=Tomcat
+After=syslog.target network.target remote-fs.target nss-lookup.target
+[Service]
+Type=forking
+PIDFile=/usr/local/tomcat9/tomcat.pid
+ExecStart=/usr/local/tomcat9/bin/startup.sh
+ExecReload=/bin/kill -s HUP $MAINPID
+ExecStop=/bin/kill -s QUIT $MAINPID
+PrivateTmp=true
+[Install]
+WantedBy=multi-user.target
+
+
+//配置开机启动 
+systemctl daemon-reload
+systemctl enable tomcat
+//启动tomcat
+systemctl start tomcat
+//停止tomcat
+systemctl stop tomcat
+//重启tomcat
+systemctl restart tomcat
+
+更改端口vim /usr/local/tomcat9/conf/server.xml
+##目前端口也是默认端口
+<<Connector port="8080" protocol="HTTP/1.1"
+               connectionTimeout="20000"
+               redirectPort="8443" />
+    <!-- A "Connector" using the shared thread pool-->
+    <!--
+    <Connector executor="tomcatThreadPool"
+               port="8080" protocol="HTTP/1.1"
+               connectionTimeout="20000"
+               redirectPort="8443" />
+//按“i”进入编辑模式，将port="8080"改成port="80"
+<Connector port="80" protocol="HTTP/1.1"
+               connectionTimeout="20000"
+               redirectPort="8443" />
+    <!-- A "Connector" using the shared thread pool-->
+    <!--
+    <Connector executor="tomcatThreadPool"
+               port="80" protocol="HTTP/1.1"
+               connectionTimeout="20000"
+               redirectPort="8443" />
+			   
+配置gui-manager项目部署方式，切换至Tomcat conf目录，输入vi tomcat-users.xml打开文件，
+按“i”进入编辑模式，拷贝以下代码放置</tomcat-users>标签之间(注意将password和username换成你自己的)
+			   
+<role rolename="manager"/>     
+<role rolename="admin"/> 
+<role rolename="admin-gui"/>
+<role rolename="manager-gui"/>
+<user username="xxx" password="***" roles="admin-gui,manager-gui"/>
+
+cd webapps/manager/META-INF/ 切换至目录，输入vi context.xml打开文件，按i进入编辑模式，将</Context> 标签下的<Valve> 标签注释掉
+
+<Context antiResourceLocking="false" privileged="true" >
+<!--注释掉此标签
+ <Valve className="org.apache.catalina.valves.RemoteAddrValve"
+         allow="127\.\d+\.\d+\.\d+|::1|0:0:0:0:0:0:0:1" />
+-->
+</Context>
+
+systemctl restart tomcat
+浏览器中直接输入你的服务器地址，例如ip地址（不用输端口号了，刚才把端口号改成80了），看见小猫咪，点击manager 输入账号密码即可部署你的项目了
+
