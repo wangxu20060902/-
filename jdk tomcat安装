@@ -1,6 +1,7 @@
 jdk  tomcat 安装
 
 安装jdk
+去官网下载jdk的安装包
 下载jdk rpm包 rpm -ivh jdk-8u152-linux-x64.rpm
 #rpm -ivh jdk-8u152-linux-x64.rpm
 
