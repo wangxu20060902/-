@@ -1,0 +1,232 @@
+easy mock 安装和部署
+根据Easy Mock的 GitHub说明文档，我们在安装Easy Mock服务之前，需要安装Node.js（8.8.1, 不支持 v10.x）& MongoDB（4.0）& Redis（5.3）。接下来，我们一一介绍这些软件的安装步骤
+1.redis 安装
+yum install gcc -y ##安装依赖
+
+下载 安装
+wget http://download.redis.io/releases/redis-5.0.3.tar.gz ##下载
+tar zvxf /root/redis-5.0.3.tar.gz  -C /usr/local/   ##解压
+cd /usr/local/  && mv redis-5.0.3 redis $&& cd redis  ##重命名
+ make && make install      ##安装依赖
+ 
+配置启动
+vim redis.conf   ##修改如下
+
+#允许远程访问
+bind 127.0.0.1 修改为 # bind 127.0.0.1
+#默认启动时后台启动
+daemonize yes
+#设置密码
+requirepass fm123456   
+
+设置开机启动
+vim /usr/lib/systemd/system/redis.service
+##添加
+
+[Unit]
+
+Description=The redis-server Process Manager
+
+After=syslog.target
+
+After=network.target
+
+
+
+[Service]
+
+Type=forking
+
+ExecStart=/usr/local/redis/src/redis-server /usr/local/redis/redis.conf
+
+ExecReload=/bin/kill -USR2 $MAINPID
+
+ExecStop=/bin/kill -SIGINT $MAINPID
+
+Restart=always
+
+PrivateTmp=true
+
+
+
+[Install]
+
+WantedBy=multi-user.target
+
+开机启动：
+
+systemctl daemon-reload
+
+systemctl start redis.service
+
+systemctl enable redis.service
+
+配置防火墙：
+
+启动防火墙：systemctl start firewalld
+
+将6379端口添加到防火墙例外并重启：
+
+firewall-cmd --zone=public --add-port=6379/tcp --permanent
+
+firewall-cmd --reload
+
+测试
+打开客户端
+./redis-cli
+127.0.0.1:6379> auth gemalto.123
+OK
+127.0.0.1:6379> set test test
+OK
+127.0.0.1:6379> get test
+"test"
+redis 安装搭建完成
+
+##############################################
+##############################################
+mongodb 的安装部署
+下载 wget https://fastdl.mongodb.org/linux/mongodb-linux-x86_64-rhel70-4.0.12.tgz
+tar zxvf mongodb-linux-x86_64-rhel70-4.0.12.tgz -C /usr/local/
+cd /usr/local/ && mv mongodb-linux-x86_64-rhel70-4.0.12/ mongodb
+mkdir -p mongodb/{data,log,conf}
+
+vim /usr/local/mongodb/conf/mongodb.conf
+
+dbpath=/usr/local/mongodb/data/  #数据文件存放目录
+logpath=/usr/local/mongodb/log/mongodb.log  #日志文件存放目录
+port=27017  #端口，默认27017，可以自定义
+logappend=true  #开启日志追加添加日志
+fork=true  #以守护程序的方式启用，即在后台运行
+bind_ip=0.0.0.0  #本地监听IP，0.0.0.0表示本地所有IP
+auth=true  #是否需要验证权限登录(用户名和密码)
+
+vim /etc/profile
+export MONGODB_HOME=/usr/local/mongodb
+export PATH=$PATH:$MONGODB_HOME/bin
+使环境变量立即生效
+source /etc/profile
+
+创建mongodb启动配置文件
+vim /usr/lib/systemd/system/mongodb.service
+
+[Unit]
+Description=mongodb
+After=network.target remote-fs.target nss-lookup.target
+
+[Service]
+Type=forking
+RuntimeDirectory=mongodb
+PIDFile=/usr/local/mongodb/data/mongod.lock
+ExecStart=/usr/local/mongodb/bin/mongod --config /etc/mongodb/mgdb.conf
+ExecStop=/usr/local/mongodb/bin/mongod --shutdown --config /etc/mongodb/mgdb.conf
+PrivateTmp=true
+
+[Install]  
+WantedBy=multi-user.target
+
+启动mongodb并加入开机启动
+systemctl daemon-reload
+systemctl start mongodb
+systemctl enable mongodb
+
+#################################
+#############################
+nodejs  安装
+
+安装 gcc、gcc-c++
+
+yum -y install gcc gcc-c++ kernel-devel
+下载源码
+
+wget https://nodejs.org/dist/v8.11.3/node-v8.11.3.tar.gz
+解压源码
+tar -xzf node-v8.11.3.tar.gz -C /usr/local/
+cd /usr/local/ && mv node-v8.11.3 node
+编译源码
+cd node
+./configure
+make
+make install
+
+node -v
+npm -v
+
+安装 easy mock
+$ git clone https://github.com/easy-mock/easy-mock.git
+$ cd easy-mock && npm install
+
+修改配置文件vim /usr/local/easy-mock/config/default.json
+
+{
+  "port": 7300,
+  "host": "0.0.0.0",
+  "pageSize": 30,
+  "proxy": false,
+  "db": "mongodb://localhost/easy-mock",
+  "unsplashClientId": "",
+  "redis": {
+    "keyPrefix": "[Easy Mock]",
+    "port": 6379,
+    "host": "localhost",
+    "password": "fm123456",
+    "db": 0
+  },
+  "blackList": {
+    "projects": [],
+    "ips": []
+  },
+  "rateLimit": {
+    "max": 1000,
+    "duration": 1000
+  },
+  "jwt": {
+    "expire": "14 days",
+    "secret": "shared-secret"
+  },
+  "upload": {
+    "types": [".jpg", ".jpeg", ".png", ".gif", ".json", ".yml", ".yaml"],
+    "size": 5242880,
+    "dir": "../public/upload",
+    "expire": {
+      "types": [".json", ".yml", ".yaml"],
+      "day": -1
+    }
+  },
+  "ldap": {
+    "server": "",
+    "bindDN": "",
+    "password": "",
+    "filter": {
+      "base": "",
+      "attributeName": ""
+    }
+  },
+  "fe": {
+    "copyright": "",
+    "storageNamespace": "easy-mock_",
+    "timeout": 25000,
+    "publicPath": "/dist/"
+  }
+}
+根据自己的环境进行更改
+
+启动
+$ npm run dev
+# 访问 http://127.0.0.1:7300
+更多命令
+# 前端静态资源构建打包
+$ npm run build
+# 以生产环境方式启动，需要提前执行 build
+$ npm run start
+# 单元测试
+$ npm run test
+# 语法检测
+$ npm run lint
+
+PM2
+当在内网服务器部署时，推荐使用 PM2 来守护你的应用进程。
+
+npm install pm2 -g
+用 PM2 启动
+在此之前，你应该已经完成了 build。
+$ NODE_ENV=production pm2 start app.js
