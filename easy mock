@@ -61,15 +61,6 @@ systemctl start redis.service
 
 systemctl enable redis.service
 
-配置防火墙：
-
-启动防火墙：systemctl start firewalld
-
-将6379端口添加到防火墙例外并重启：
-
-firewall-cmd --zone=public --add-port=6379/tcp --permanent
-
-firewall-cmd --reload
 
 测试
 打开客户端
@@ -117,8 +108,8 @@ After=network.target remote-fs.target nss-lookup.target
 Type=forking
 RuntimeDirectory=mongodb
 PIDFile=/usr/local/mongodb/data/mongod.lock
-ExecStart=/usr/local/mongodb/bin/mongod --config /etc/mongodb/mgdb.conf
-ExecStop=/usr/local/mongodb/bin/mongod --shutdown --config /etc/mongodb/mgdb.conf
+ExecStart=/usr/local/mongodb/bin/mongod --config /usr/local/mongodb/conf/mongodb.conf
+ExecStop=/usr/local/mongodb/bin/mongod --shutdown --config /usr/local/mongodb/conf/mongodb.conf
 PrivateTmp=true
 
 [Install]  
@@ -230,3 +221,37 @@ npm install pm2 -g
 用 PM2 启动
 在此之前，你应该已经完成了 build。
 $ NODE_ENV=production pm2 start app.js
+
+启动  步骤
+npm run build
+npm run start
+npm install pm2 -g
+NODE_ENV=production pm2 start app.js
+访问地址 http://101.132.25.64:7300/
+###########################################
+##############################################
+yapi 安装部署
+
+yapi 环境需要nodejs 和 mongodb  上面已经安装过
+
+创建部署目录 
+mkdir -p /usr/local/yapi  && cd /usr/local/yapi
+通过Gitlhub提供的yapi-cli工具部署
+npm install -g yapi-cli --registry https://registry.npm.taobao.org
+yapi server
+在浏览器打开 http://0.0.0.0:9090 访问。非本地服务器，请将 0.0.0.0 替换成指定的域名或ip
+
+在浏览器中输入101.132.25.64:9090  进行部署 本次部署除了填写了公司名称其他都保持了默认，这个可以根据自己的实际情况尽心安装部署
+默认账号密码：admin@admin.com，密码：ymfe.org
+
+启动、访问YApi站点
+cd /usr/local/yapi/my-yapi
+node vendors/server/app.js
+
+安装pm2工具管理NodeJS
+npm install -g pm2 //安装  本次上面部署easy mock 的已经安装此次不需要执行
+pm2 start vendors/server/app.js //添加yapi进程到pm2管理模块中
+pm2 startup //生成自启脚本，保持当前进程活跃
+pm2 save //保存当前进程状态
+
+http://101.132.25.64:3000
