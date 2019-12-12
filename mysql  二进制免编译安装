@@ -13,8 +13,8 @@ cd /usr/local/mysql/
 修改拥有者为mysql用户
 chown -R mysql:mysql ./
 
-cp /usr/local/mysql/support-files/mysql.server /etc/init.d/mysql
-vi /etc/init.d/mysql
+cp /usr/local/mysql/support-files/mysql.server /etc/init.d/mysqld
+vi /etc/init.d/mysqld
  修改的内容
 basedir=/usr/local/mysql
 datadir=/usr/local/mysql/data
@@ -48,9 +48,9 @@ firewall-cmd --reload
 查看自启服务列表
 chkconfig --list
 添加mysql服务到自启服务
-chkconfig --add mysql
+chkconfig --add mysqld
 设置自启
-chkconfig mysql on
+chkconfig mysqld on
 
 vi /etc/profile
  修改的内容
