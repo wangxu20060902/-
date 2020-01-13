@@ -1,0 +1,120 @@
+keepalived + nginx 实现nginx的高可用
+
+lab01 192.168.52.128  keepalived+nginx
+lab02 192.168.52.129  keepalived+nginx
+vip 192.168.52.1253
+
+分别在两台WEB服务器安装nginx和keepalived：
+yum install nginx keepalived -y
+
+防火墙添加arrp组播规则，或关闭防火墙
+firewall-cmd --direct --permanent --add-rule ipv4 filter INPUT 0 --in-interface enp4s0 --destination 224.0.0.18 --protocol vrrp -j ACCEPT
+firewall-cmd --reload
+本次为关闭防火墙
+systemctl stop firewalld
+systemctl disable firewalld
+
+关闭selinux
+vi /etc/sysconfig/selinux
+#修改:
+SELINUX=disabled
+#setenforce 0
+
+keepalived 抢占模式的配置master
+
+vim /etc/keepalived/keepalived.conf
+
+global_defs {
+   router_id lab01  #标识本节点的名称，通常为hostname
+}
+
+## keepalived会定时执行脚本并对脚本执行的结果进行分析,动态调整vrrp_instance的优先级。
+##如果脚本执行结果为0,并且weight配置的值大于0,则优先级相应的增加。如果脚本执行结果非0,
+##并且weight配置的值小于 0,则优先级相应的减少。其他情况,维持原本配置的优先级,即配置文件中priority对应的值。
+vrrp_script chk_nginx {
+       script "/etc/keepalived/nginx_check.sh"
+       interval 2  #每2秒检测一次nginx的运行状态
+       weight -20  #失败一次，将自己的优先级-20
+}
+
+vrrp_instance VI_1 {
+    state MASTER                  # 状态，主节点为MASTER，备份节点为BACKUP
+    interface ens33              # 绑定VIP的网络接口，通过ifconfig查看自己的网络接口
+    virtual_router_id 51          # 虚拟路由的ID号,两个节点设置必须一样,可选IP最后一段使用,相同的VRID为一个组,他将决定多播的MAC地址
+    mcast_src_ip 192.168.52.128    # 本机IP地址
+    priority 100                  # 节点优先级，值范围0～254，MASTER要比BACKUP高
+    advert_int 1                  # 组播信息发送时间间隔，两个节点必须设置一样，默认为1秒
+    # 设置验证信息，两个节点必须一致
+    authentication {
+        auth_type PASS
+        auth_pass 1111
+    }
+    # 虚拟IP，两个节点设置必须一样。可以设置多个，一行写一个
+    virtual_ipaddress {
+        192.168.52.253
+    }
+
+    track_script {
+       chk_nginx  # nginx存活状态检测脚本
+    }
+}
+
+keepalived backup 节点配置
+
+global_defs {
+   router_id lab02
+}
+
+vrrp_script chk_nginx {
+    script "/etc/keepalived/nginx_check.sh"
+    interval 2
+    weight -20
+}
+
+vrrp_instance VI_1 {
+    state BACKUP
+    interface ens33
+    virtual_router_id 51
+    mcast_src_ip 192.168.52.129
+    priority 90
+    advert_int 1
+    authentication {
+        auth_type PASS
+        auth_pass 1111
+    }
+    virtual_ipaddress {
+        192.168.52.253
+    }
+
+    track_script {
+       chk_nginx
+    }
+}
+
+创建nginx服务检测脚本
+分别在主备服务器/etc/keepalived目录下创建nginx_check.sh脚本，并为其添加执行权限chmod +x /etc/keepalived/nginx_check.sh。用于keepalived定时检测nginx的服务状态，
+如果nginx停止了，会尝试重新启动nginx，如果启动失败，会将keepalived进程杀死，将vip漂移到备份机器上
+vim /etc/keepalived/nginx_check.sh
+#!/bin/bash
+d=`date --date today +%Y%m%d_%H:%M:%S`
+A=`ps -C nginx --no-header | wc -l`
+if [ $A -eq 0 ];then
+    systemctl start nginx  #尝试重新启动nginx
+    sleep 2  #睡眠2秒
+    if [ `ps -C nginx --no-header | wc -l` -eq 0 ];then
+	     echo "$d nginx down,keepalive will stop" >> /var/log/check_ng.log
+        killall keepalived #启动失败，将keepalived服务杀死。将vip漂移到其它备份节点
+    fi
+fi
+
+配置完成后在两台机器上分别启动nginx 和keepalived 服务
+systemctl start nginx
+systemctl enable nginx
+systemctl start keepalived  
+systemctl enable keepalived
+
+测试停止主服务器上的keepalived
+systemctl stop keepalived
+通过ip addr show
+来查看vip 的飘移状况
+实验测试成功
