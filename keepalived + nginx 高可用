@@ -8,7 +8,7 @@ vip 192.168.52.1253
 yum install nginx keepalived -y
 
 防火墙添加arrp组播规则，或关闭防火墙
-firewall-cmd --direct --permanent --add-rule ipv4 filter INPUT 0 --in-interface enp4s0 --destination 224.0.0.18 --protocol vrrp -j ACCEPT
+firewall-cmd --direct --permanent --add-rule ipv4 filter INPUT 0 --in-interface ens33 --destination 224.0.0.18 --protocol vrrp -j ACCEPT
 firewall-cmd --reload
 本次为关闭防火墙
 systemctl stop firewalld
