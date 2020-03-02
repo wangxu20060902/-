@@ -1,0 +1,97 @@
+nginx 高级设置
+
+通过配置 Nginx 配置文件，实现正向代理、反向代理、负载均衡、Nginx 缓存、动静分离和高可用 Nginx 6种功能，并对 Nginx 的原理作进一步的解析
+
+1. 正向代理
+正向代理的代理对象是客户端。正向代理就是代理服务器替客户端去访问目标服务器。
+
+1.1 实战一
+实现效果：
+在浏览器输入 www.google.com , 浏览器跳转到www.google.com 。
+具体配置：
+server{    resolver 8.8.8.8;    listen 80;    location / {        proxy_pass http://$http_host$request_uri;    }}
+
+在需要访问外网的客户端上执行以下一种操作即可：
+1. 方法1（推荐）export http_proxy=http://你的正向代理服务器地址：代理端口   
+2. 方法2 vim ~/.bashrcexport http_proxy=http://你的正向代理服务器地址：代理端口
+
+2. 反向代理
+
+反向代理指代理后端服务器响应客户端请求的一个中介服务器，代理的对象是服务端。
+2.1 实战一
+
+实现效果：
+在浏览器输入 www.abc.com , 从 nginx 服务器跳转到 linux 系统 tomcat 主页面。
+具体配置：
+
+ server {        listen       80;           server_name  192.168.4.32;   #监听地址           location  / {                  root html;  #/html目录           proxy_pass http://127.0.0.1:8080;  #请求转向           index  index.html index.htm;      #设置默认页               }     }
+ 
+ 2.2 实战二
+
+实现效果：
+  根据在浏览器输入的路径不同，跳转到不同端口的服务中。
+具体配置：
+    server {        listen       9000;           server_name  192.168.4.32;   #监听地址                       location  ~ /example1/ {             proxy_pass http://127.0.0.1:5000;                 }         location  ~ /example2/ {             proxy_pass http://127.0.0.1:8080;                 }     }
+
+location 指令说明：
+•~ : 表示uri包含正则表达式，且区分大小写。
+•~* : 表示uri包含正则表达式，且不区分大小写。
+•= : 表示uri不含正则表达式，要求严格匹配。
+
+3 负载均衡
+
+3.1 实战一
+
+实现效果：
+在浏览器地址栏输入 http://192.168.4.32/example/a.html ，平均到 5000 和 8080 端口中，实现负载均衡效果。
+具体配置：
+    upstream myserver {         server 192.167.4.32:5000;      server 192.168.4.32:8080;    }        server {        listen       80;   #监听端口        server_name  192.168.4.32;   #监听地址           location  / {                  root html;  #html目录           index index.html index.htm;  #设置默认页           proxy_pass  http://myserver;  #请求转向 myserver 定义的服务器列表              }     }
+
+nginx 分配服务器策略
+•轮询（默认）
+按请求的时间顺序依次逐一分配，如果服务器down掉，能自动剔除。
+•权重
+  weight 越高，被分配的客户端越多，默认为 1。比如： upstream myserver { server 192.167.4.32:5000 weight=10; server 192.168.4.32:8080 weight=5; } 复制代码
+•ip
+按请求 ip 的 hash 值分配，每个访客固定访问一个后端服务器。比如： upstream myserver { ip_hash; server 192.167.4.32:5000; server 192.168.4.32:8080; } 复制代码
+•fair
+按后端服务器的响应时间来分配，响应时间短的优先分配到请求。比如： upstream myserver { fair; server 192.168.4.32:5000; server 192.168.4.32:8080; }
+
+4. Nginx 缓存
+
+4.1 实战一
+
+实现效果：
+在3天内，通过浏览器地址栏访问 http://192.168.4.32/a.jpg ，不会从服务器抓取资源，3天后（过期）则从服务器重新下载。
+具体配置：
+# http 区域下添加缓存区配置proxy_cache_path /tmp/nginx_proxy_cache levels=1 keys_zone=cache_one:512m inactive=60s max_size=1000m;# server 区域下添加缓存配置location ~ \.(gif|jpg|png|htm|html|css|js)(.*) {     proxy_pass http://192.168.4.32:5000；#如果没有缓存则转向请求     proxy_redirect off;     proxy_cache cache_one;     proxy_cache_valid 200 1h;            #对不同的 HTTP 状态码设置不同的缓存时间     proxy_cache_valid 500 1d;     proxy_cache_valid any 1m;     expires 3d;}
+
+expires 是给一个资源设定一个过期时间，通过 expires 参数设置，可以使浏览器缓存过期时间之前的内容，减少与服务器之间的请求和流量。也就是说无需去服务端验证，直接通过浏览器自身确认是否过期即可，所以不会产生额外的流量。此种方法非常适合不经常变动的资源。
+ 
+5. 动静分离
+
+5.1 实战一
+
+实现效果：
+通过浏览器地址栏访问 www.abc.com/a.html ，访问静态资源服务器的静态资源内容。通过浏览器地址栏访问 www.abc.com/a.jsp ，访问动态资源服务器的动态资源内容。
+具体配置：
+upstream static {       server 192.167.4.31:80;}upstream dynamic {       server 192.167.4.32:8080;}server {    listen       80;   #监听端口    server_name  www.abc.com; 监听地址    # 拦截动态资源    location ~ .*\.(php|jsp)$ {       proxy_pass http://dynamic;    }       # 拦截静态资源    location ~ .*\.(jpg|png|htm|html|css|js)$ {              root /data/;  #html目录       proxy_pass http://static;       autoindex on;;  #自动打开文件列表    }  }
+
+Nginx 启动之后，在 Linux 系统中有两个进程，一个为 master，一个为 worker。master 作为管理员不参与任何工作，只负责给多个 worker 分配不同的任务（worker 一般有多个）。
+ps -ef |grep nginxroot     20473     1  0  2019 ?        00:00:00 nginx: master process /usr/sbin/nginxnginx     4628 20473  0 Jan06 ?        00:00:00 nginx: worker processnginx     4629 20473  0 Jan06 ?        00:00:00 nginx: worker process
+
+worker 是如何工作的？
+客户端发送一个请求首先要经过 master，管理员收到请求后会将请求通知给 worker，多个 worker 以争抢的机制来抢夺任务，得到任务的 worker 会将请求经由 tomcat 等做请求转发、反向代理、访问数据库等（nginx 本身是不直接支持 java 的）。
+
+6. 原理解析
+
+一个 master 和多个 worker 的好处？
+•可以使用 nginx -s reload 进行热部署。
+•每个 worker 是独立的进程，如果其中一个 worker 出现问题，其它 worker 是独立运行的，会继续争抢任务，实现客户端的请求过程，而不会造成服务中断。
+
+设置多少个 worker 合适？
+  Nginx 和 redis 类似，都采用了 io 多路复用机制，每个 worker 都是一个独立的进程，每个进程里只有一个主线程，通过异步非阻塞的方式来处理请求，每个 worker 的线程可以把一个 cpu 的性能发挥到极致，因此，worker 数和服务器的 cpu 数相等是最为适宜的。
+
+思考：
+（1）发送一个请求，会占用 worker 几个连接数？
+（2）有一个 master 和 4个 worker，每个 worker 支持的最大连接数为 1024，该系统支持的最大并发数是多少？
