@@ -1,0 +1,179 @@
+kafka 安装部署及监控
+1.安装前准备工作下载需要安装部署的软件
+systemctl stop firewalld  ##关闭防火墙
+vim /etc/selinux/config
+SELINUX=disabled
+
+环境配置
+192.168.140.136  zookeeper kafka jmx_prometheus_javaagent-0.6.jar
+192.168.140.138  zookeeper kafka jmx_prometheus_javaagent-0.6.jar
+192.168.140.139  zookeeper kafka jmx_prometheus_javaagent-0.6.jar
+
+wget https://mirrors.bfsu.edu.cn/apache/kafka/2.4.1/kafka_2.11-2.4.1.tgz ###下载kafka
+wget https://downloads.apache.org/zookeeper/zookeeper-3.5.8/apache-zookeeper-3.5.8.tar.gz  ##现在zookeeper
+wget https://raw.githubusercontent.com/prometheus/jmx_exporter/master/example_configs/kafka-0-8-2.yml   ###监控kafka 配置模板
+wget https://repo1.maven.org/maven2/io/prometheus/jmx/jmx_prometheus_javaagent/0.6/jmx_prometheus_javaagent-0.6.jar  ##下载jmx jar包用来监控
+https://pan.baidu.com/s/1qYifoa4 密码：el4o ###下载kafka manager  kafka-manager-1.3.3.7.zip 
+
+**************************************kafka集群部署之java环境配置******************************************
+
+kafka运行需要基于java环境 所以先配置系统的java环境
+首先要去下载好JDK，Java SE 8的官方网址是http://www.oracle.com/technetwork/java/javase/downloads/jdk8-downloads-2133151.html
+Linux提供了两种安装方式一个是.rpm，另一个是.tar.gz，我所使用的是.tar.gz
+tar zxvf jdk-8u251-linux-x64.tar.gz
+mv jdk1.8.0_251/ /usr/local/java
+设置环境变量，需要修改/etc/profile文件
+vim /etc/profile
+
+export JAVA_HOME=/usr/local/java
+export JRE_HOME=/usr/local/java/jre
+export CLASSPATH=.:$JAVA_HOME/lib:$JRE_HOME/lib:$CLASSPATH
+export PATH=$JAVA_HOME/bin:$JRE_HOME/bin:$PATH
+使环境变量生效
+source /etc/profile
+查看java 信息
+java -version  
+
+****************************kafka集群部署之zookeeper********************************************************
+
+tar zxvf apache-zookeeper-3.5.8.tar.gz -c /usr/local/ && cd  /usr/local && mv apache-zookeeper-3.5.8.tar.gz zookeeper
+mkdir -p /usr/local/zookeeper/zkdatas  
+配置zookeeper
+cd conf && cp zoo_sample.cfg zoo.cfg && vim zoo.cfg
+
+tickTime=2000
+initLimit=10
+syncLimit=5
+dataDir=/usr/local/zookeeper/zkdatas/
+clientPort=2181
+server.1=192.168.140.136:2888:3888
+server.2=192.168.140.138:2888:3888
+server.3=192.168.140.139:2888:3888
+
+创建数据目录和myid
+mkdir -p /usr/local/zookeeper/zkdatas  && cd zkdatas && touch myid  
+并编辑myid 为1
+把zookeeper 分发到另外两台服务器上
+scp -r /usr/local/zookeeper root@192.168.140.138:/usr/local
+scp -r /usr/local/zookeeper root@192.168.140.139:/usr/local
+
+此处需要另外两台机器根据环境更改myid的值 2 3 
+启动zookeeper
+分别在三个节点启动/停止
+/usr/local/zookeeper/bin/zkServer.sh start ##启动zk
+/usr/local/zookeeper/bin/zkServer.sh stop  ##停止zk
+/usr/local/zookeeper/bin/zkServer.sh stop  ## 查看zk的状态
+
+可以通过ss -tnlp |grep 2181 查看端口  确保zk集群正常启动
+
+******************************************kafka 集群之kafka部署*******************************************
+
+tar zxvf kafka_2.11-2.4.1.tgz -C /usr/local && cd /usr/local && mv kafka_2.11-2.4.1 kafka
+配置kafka 的配置文件 vim kafka/config/server.properties
+broker.id=1
+
+listeners=PLAINTEXT://:9092
+num.network.threads=3
+num.io.threads=8
+socket.send.buffer.bytes=102400
+
+socket.receive.buffer.bytes=102400
+
+socket.request.max.bytes=104857600
+
+log.dirs=/usr/local/kafka/kafkalogs
+num.partitions=3
+
+num.recovery.threads.per.data.dir=1
+
+offsets.topic.replication.factor=1
+transaction.state.log.replication.factor=1
+transaction.state.log.min.isr=1
+
+log.retention.hours=168
+
+log.segment.bytes=1073741824
+
+log.retention.check.interval.ms=300000
+
+zookeeper.connect=192.168.140.136:2181,192.168.140.138:2181,192.168.140.139:2181
+
+zookeeper.connection.timeout.ms=6000
+group.initial.rebalance.delay.ms=0
+
+此处需要注意的broker.id 不能一样 配置刚才部署的zookeeper集群地址 去掉#listeners=PLAINTEXT://:9092注释监听9092端口
+
+把kafka的文件分发到另外两台服务器上
+scp -r /usr/local/kafka root@192.168.140.138:/usr/local
+scp -r /usr/local/kafka root@192.168.140.139:/usr/local
+
+此处需要注意：在另外两台机器上修改配置文件需要注意的是broker的id不能相同
+以上配置完成就可以启动kafka了,分别在三台机器上执行
+
+./bin/kafka-server-start.sh -daemon config/server.properties
+
+可以通jps 命令查看kafka 也可以通过ss -tnlp|grep 9092 查看端口
+
+
+*****************************kafka 监控之kafka manager 部署*********************************************
+解压下载已经编译过的kafka-manager-1.3.3.7.zip 
+unzip kafka-manager-1.3.3.7.zip && mv kafka-manager-1.3.3.7 /usr/local/kafka-manager && cd /usr/local/kafka-manager
+配置kafka-manager
+vim conf/application.conf
+把kafka-manager.zkhosts="localhost:2181" 更改成自己的zookeeper地址如：
+
+kafka-manager.zkhosts="192.168.140.136:2181,192.168.140.138:2181,192.168.140.139:2181"
+启动kafka-manager
+
+kafka-manager 默认的端口是9000，可通过 -Dhttp.port，指定端口; -Dconfig.file=conf/application.conf指定配置文件:
+
+nohup bin/kafka-manager -Dconfig.file=conf/application.conf -Dhttp.port=8080 &
+我这里使用的是默认端口9000  注意防火墙如果开启需要放行以上端口
+在浏览器种收入http://192.168.140.136:9000/
+点击【Cluster】>【Add Cluster】打开如下添加集群的配置界面：
+输入集群的名字（如Kafka-Cluster-1）和 Zookeeper 服务器地址（如192.168.140.136:2181,192.168.140.138:2181,192.168.140.139:2181），选择最接近的Kafka版本（如0.10.1.0）
+
+注意：如果没有在 Kafka 中配置过 JMX_PORT，千万不要选择第一个复选框。
+Enable JMX Polling
+如果选择了该复选框，Kafka-manager 可能会无法启动。
+其他broker的配置可以根据自己需要进行配置，默认情况下，点击【保存】时，会提示几个默认值为1的配置错误，需要配置为>=2的值。提示如下
+
+kafka-manager 采集kafka的信息一部分数据是通过JMX采集到的所以建议启动kafka 使用下面的方式启动
+JMX_PORT=9999 ./kafka-server-start.sh -daemon ../config/server.properties
+
+*******************************prometheus 监控kafka 之jmx_prometheus_javaagent******************************
+mkdir -p  /usr/local/kafka/monitor && cd  /usr/local/kafka/monitor   ####用于配置jar包和配置文件
+
+wget https://raw.githubusercontent.com/prometheus/jmx_exporter/master/example_configs/kafka-0-8-2.yml
+wget https://repo1.maven.org/maven2/io/prometheus/jmx/jmx_prometheus_javaagent/0.6/jmx_prometheus_javaagent-0.6.jar
+
+打开 kafka-server-start.sh 文件
+
+vim /usr/local/kafka/bin/kafka-server-start.sh
+添加几行代码：
+
+export JMX_PORT="9999"
+export KAFKA_OPTS="-javaagent:/usr/local/kafka/monitor/jmx_prometheus_javaagent-0.6.jar=9991:/usr/local/kafka/monitor/kafka-0-8-2.yml"
+
+然后重启kafka。
+访问 http://localhost:9991/metrics 可以看到各种指标了
+
+配置prometheus
+vim prometheus.yml
+#添加job如下：
+  - job_name: 'kafka'
+    static_configs:
+    - targets: ['192.168.140.136:9991','192.168.140.138:9991','192.168.140.139:9991']
+
+
+然后再grafana导入面板
+https://grafana.com/grafana/dashboards/9018
+
+
+
+
+
+
+
+
+
